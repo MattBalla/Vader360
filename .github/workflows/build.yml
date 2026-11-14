@@ -1,0 +1,111 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # publish the release on tags
+
+env:
+  # OpenXeChain toolchain, built from source at a pinned commit
+  OXC_BUILDSCRIPT_COMMIT: eed1fa65bf9577fd31625764b320a90182ea9ade
+  # SynthXEX system-DLL patch (GPL-3.0, Jacckii/Xbox360-Series-Controllers-Bridge),
+  # downloaded at a pinned commit and only run here; not part of this repository.
+  SYNTHXEX_PATCH_URL: https://raw.githubusercontent.com/Jacckii/Xbox360-Series-Controllers-Bridge/ad6e4ba66660b72f3fbe268887d0968809a3d049/toolchain/synthxex_dll_patch.py
+  OXC: ${{ github.workspace }}/../oxc/prefix
+  OXC_SRC: ${{ github.workspace }}/../oxc/src
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache OpenXeChain toolchain
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.OXC }}
+            ${{ env.OXC_SRC }}/synthxex
+          key: oxc-${{ env.OXC_BUILDSCRIPT_COMMIT }}-ubuntu-24.04-v1
+
+      - name: Install build dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake ninja-build git python3 clang lld \
+            autoconf automake libtool pkg-config texinfo bison flex gawk \
+            libgmp-dev libmpfr-dev libmpc-dev zlib1g-dev libzstd-dev
+
+      - name: Fetch OpenXeChain buildscript
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          git clone https://github.com/OpenXeChain/buildscript.git "$OXC_SRC"
+          cd "$OXC_SRC"
+          git checkout "$OXC_BUILDSCRIPT_COMMIT"
+          # submodules are listed with SSH URLs; CI has no SSH key
+          sed -i 's#git@github.com:#https://github.com/#g' .gitmodules
+          git submodule sync --recursive
+          git submodule update --init --recursive
+          # clang-cpp ignores clang.cfg (no sysroot): configure Newlib with clang -E instead
+          sed -i 's#CPP="${PREFIX}/bin/clang-cpp"#CPP="${PREFIX}/bin/clang -E -nostdlib -I${PWD}/xecorelibtmp/include"#' build-toolchain.sh
+
+      - name: Build OpenXeChain (first run only, ~2-3 h)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          cd "$OXC_SRC"
+          mkdir -p "$OXC"
+          PREFIX="$OXC" PARALLEL=4 ./build-toolchain.sh 2>&1 | tail -n 200
+
+      - name: Build synthxex-patched (system-DLL support)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          rm -rf /tmp/sx && cp -r "$OXC_SRC/synthxex" /tmp/sx
+          curl -fsSL "$SYNTHXEX_PATCH_URL" -o /tmp/synthxex_dll_patch.py
+          (cd /tmp/sx/src && python3 /tmp/synthxex_dll_patch.py)
+          (cd /tmp/sx && gcc -O2 -Iinclude $(find src include -name '*.c') -o "$OXC/bin/synthxex-patched")
+
+      - name: Toolchain versions
+        run: |
+          "$OXC/bin/clang" --version
+          ls -l "$OXC/bin/synthxex" "$OXC/bin/synthxex-patched"
+
+      - name: Build plugin
+        run: OXC="$OXC" bash build.sh
+
+      - name: Package
+        run: |
+          set -euxo pipefail
+          mkdir -p dist/Vader360/Plugins
+          cp out/vader360.xex dist/Vader360/Plugins/
+          cp README.md README.pt-BR.md LICENSE dist/Vader360/
+          cp examples/launch.ini.snippet dist/Vader360/
+          cp tools/vader360-check.ps1 dist/Vader360/
+          (cd dist && zip -r ../Vader360-${GITHUB_REF_NAME//\//-}.zip Vader360)
+          sha256sum Vader360-*.zip out/vader360.xex | tee SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vader360-${{ github.sha }}
+          path: |
+            Vader360-*.zip
+            out/vader360.xex
+            SHA256SUMS.txt
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" Vader360-*.zip out/vader360.xex SHA256SUMS.txt \
+            --title "Vader360 $GITHUB_REF_NAME" --notes-file CHANGELOG.md --verify-tag
