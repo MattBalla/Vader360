@@ -10,7 +10,6 @@
 
         .text
         .globl  DllMain
-        .type   DllMain, @function
 DllMain:
         stwu    1, -176(1)          # 16-byte header + 18 * 8 bytes, 16-aligned
         mflr    0
@@ -58,4 +57,3 @@ DllMain:
         mtlr    0
         addi    1, 1, 176
         blr
-        .size   DllMain, .-DllMain
