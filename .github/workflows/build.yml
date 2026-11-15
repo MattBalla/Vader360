@@ -26,9 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache OpenXeChain toolchain
+      # Restore and save are separate steps so the toolchain is cached as soon as it
+      # is built, even if a later step of the same run fails.
+      - name: Restore OpenXeChain toolchain
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ env.OXC }}
@@ -66,14 +68,25 @@ jobs:
           mkdir -p "$OXC"
           PREFIX="$OXC" PARALLEL=4 ./build-toolchain.sh 2>&1 | tail -n 200
 
-      - name: Build synthxex-patched (system-DLL support)
+      - name: Save OpenXeChain toolchain
         if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.OXC }}
+            ${{ env.OXC_SRC }}/synthxex
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      # SYNTHXEX_VERSION normally comes from SynthXEX's CMake (git describe); define it here
+      - name: Build synthxex-patched (system-DLL support)
         run: |
           set -euxo pipefail
           rm -rf /tmp/sx && cp -r "$OXC_SRC/synthxex" /tmp/sx
           curl -fsSL "$SYNTHXEX_PATCH_URL" -o /tmp/synthxex_dll_patch.py
           (cd /tmp/sx/src && python3 /tmp/synthxex_dll_patch.py)
-          (cd /tmp/sx && gcc -O2 -Iinclude $(find src include -name '*.c') -o "$OXC/bin/synthxex-patched")
+          (cd /tmp/sx && gcc -O2 -DSYNTHXEX_VERSION='"v0.0.5-sysdll"' -Iinclude \
+             $(find src include -name '*.c') -o "$OXC/bin/synthxex-patched")
+          "$OXC/bin/synthxex-patched" --help | head -n 5 || true
 
       - name: Toolchain versions
         run: |
