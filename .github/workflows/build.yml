@@ -16,8 +16,9 @@ env:
   # SynthXEX system-DLL patch (GPL-3.0, Jacckii/Xbox360-Series-Controllers-Bridge),
   # downloaded at a pinned commit and only run here; not part of this repository.
   SYNTHXEX_PATCH_URL: https://raw.githubusercontent.com/Jacckii/Xbox360-Series-Controllers-Bridge/ad6e4ba66660b72f3fbe268887d0968809a3d049/toolchain/synthxex_dll_patch.py
-  OXC: ${{ github.workspace }}/../oxc/prefix
-  OXC_SRC: ${{ github.workspace }}/../oxc/src
+  # absolute paths outside the checkout: actions/cache rejects paths containing '..'
+  OXC: /home/runner/oxc/prefix
+  OXC_SRC: /home/runner/oxc/src
 
 jobs:
   build:
