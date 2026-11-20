@@ -4,7 +4,8 @@
 
 usage: check_xex.py <llvm-objdump> <plugin.exe> <plugin.xex>
 
-- the XEX starts with the XEX2 magic and is a DLL with the expected entry point;
+- the XEX starts with the XEX2 magic and is a DLL;
+- the PE has the expected base and its entry point lands on code;
 - no floating-point instruction anywhere in the code (DllMain has no FP context);
 - the patch table and the "VDR3" state block are in the image.
 """
@@ -46,16 +47,32 @@ def main():
     fp = [l for l in dis.splitlines() if is_fp(l)]
     if fp:
         fail("floating-point instructions found:\n" + "\n".join(fp[:10]))
-    if "<DllMain>" not in dis or "<vader360_dllmain>" not in dis:
-        fail("DllMain / vader360_dllmain not found in the image")
-
+    # The linked image has no symbol table, so check the PE header instead:
+    # expected base, and an entry point that lands on disassembled code.
     pe = open(exe, "rb").read()
+    if pe[:2] != b"MZ":
+        fail("PE image missing MZ header")
+    nt = struct.unpack_from("<I", pe, 0x3C)[0]
+    if pe[nt:nt + 4] != b"PE\0\0":
+        fail("PE signature missing")
+    opt = nt + 4 + 20
+    if struct.unpack_from("<H", pe, opt)[0] != 0x10B:
+        fail("not a PE32 image")
+    entry_rva = struct.unpack_from("<I", pe, opt + 16)[0]
+    image_base = struct.unpack_from("<I", pe, opt + 28)[0]
+    if image_base != 0x91660000:
+        fail(f"unexpected image base {image_base:#x} (want 0x91660000)")
+    entry = image_base + entry_rva
+    if not entry_rva or not re.search(rf"^\s*{entry:08x}:", dis, re.M | re.I):
+        fail(f"entry point {entry:#x} is not on disassembled code")
+
     if b"VDR3"[::-1] not in pe and b"VDR3" not in pe:
         fail("state block (VDR3) missing")
     if struct.pack(">I", 0x39400040) not in pe or struct.pack(">I", 0x41980164) not in pe:
         fail("patch table missing")
 
-    print(f"check_xex: OK ({len(data)} bytes, module flags {module_flags:#x}, no FP)")
+    print(f"check_xex: OK ({len(data)} bytes, module flags {module_flags:#x}, "
+          f"entry {entry:#x}, no FP)")
 
 
 if __name__ == "__main__":
