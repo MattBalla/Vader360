@@ -21,9 +21,10 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+# "L" suffix: in Windows PowerShell 5.1 a bare 0x8xxxxxxx literal is a negative Int32.
 $Sites = @(
-    @{ Addr = 0x800F98F8; Before = '2B030001'; Orig = '39400020'; New = '39400040'; After = '419A0008'; What = 'WgcAddDevice max packet 32 -> 64' },
-    @{ Addr = 0x800F9490; Before = '995F0098'; Orig = '409A0164'; New = '41980164'; After = '897D0000'; What = 'input report length == 20 -> >= 20' }
+    @{ Addr = 0x800F98F8L; Before = '2B030001'; Orig = '39400020'; New = '39400040'; After = '419A0008'; What = 'WgcAddDevice max packet 32 -> 64' },
+    @{ Addr = 0x800F9490L; Before = '995F0098'; Orig = '409A0164'; New = '41980164'; After = '897D0000'; What = 'input report length == 20 -> >= 20' }
 )
 
 $client = New-Object Net.Sockets.TcpClient
