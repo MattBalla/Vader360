@@ -30,7 +30,9 @@ typedef struct {
     const char *what;
 } patch_site_t;
 
-static const patch_site_t k_sites[] = {
+// "used": keep the table in .rdata even when -O2 folds it into immediates, so it
+// can be inspected in the image (tools/check_xex.py looks for it).
+__attribute__((used)) static const patch_site_t k_sites[] = {
     // cmplwi r3,1 / li r10,0x20 -> li r10,0x40 / beq +8
     { 0x800F98F8, 0x2B030001, 0x39400020, 0x39400040, 0x419A0008,
       "WgcAddDevice: full-speed max packet 32 -> 64" },
